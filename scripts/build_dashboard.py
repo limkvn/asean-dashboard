@@ -4,7 +4,7 @@ Dashboard Generator
 Reads the SQLite database and generates a self-contained HTML dashboard.
 
 Usage:
-  python build_dashboard.py                    # output to ../dashboard.html
+  python build_dashboard.py                    # output to ../index.html
   python build_dashboard.py -o /path/out.html  # custom output path
 """
 
@@ -16,7 +16,7 @@ from datetime import datetime
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.abspath(os.path.join(SCRIPT_DIR, '..', 'data', 'dashboard.db'))
-DEFAULT_OUTPUT = os.path.abspath(os.path.join(SCRIPT_DIR, '..', 'dashboard.html'))
+DEFAULT_OUTPUT = os.path.abspath(os.path.join(SCRIPT_DIR, '..', 'index.html'))
 
 
 def load_data():
