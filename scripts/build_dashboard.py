@@ -456,7 +456,7 @@ def build_html(data):
 </div>
 
 <div class="footer">
-  <span>ASEAN Markets Dashboard &mdash; Data from ExchangeRate-API, Yahoo Finance, Asian Bonds Online (ADB), Investing.com</span>
+  <span>ASEAN Markets Dashboard &mdash; Data from Yahoo Finance, Asian Bonds Online (ADB), Investing.com</span>
   <span>Generated: {generated_at}</span>
 </div>
 
