@@ -29,7 +29,7 @@ def init_db():
             indicator   TEXT NOT NULL,       -- e.g. 'IDR', 'US_10Y', 'BRENT'
             value       REAL,               -- the numeric value
             unit        TEXT,               -- e.g. 'per_USD', 'percent', 'USD/bbl'
-            source      TEXT,               -- e.g. 'exchangerate-api', 'yfinance'
+            source      TEXT,               -- e.g. 'yfinance:fx', 'yfinance:brent'
             ingested_at TEXT NOT NULL,       -- ISO timestamp of when we stored it
             PRIMARY KEY (date, indicator)
         )
@@ -63,7 +63,7 @@ def init_db():
     c.execute('''
         CREATE TABLE IF NOT EXISTS data_sources (
             source_key      TEXT PRIMARY KEY,    -- short key used in daily_data.source
-            provider        TEXT NOT NULL,        -- e.g. "Yahoo Finance", "ExchangeRate-API"
+            provider        TEXT NOT NULL,        -- e.g. "Yahoo Finance", "Asian Development Bank"
             provider_url    TEXT,                 -- link to provider homepage
             dataset         TEXT,                 -- specific dataset or product name
             ticker_or_id    TEXT,                 -- ticker symbol or series ID used
@@ -77,16 +77,12 @@ def init_db():
 
     # Seed data sources
     data_sources = [
-        # FX sources
-        ('exchangerate-api', 'ExchangeRate-API (Open)', 'https://open.er-api.com',
-         'Open Exchange Rates', None, 'https://open.er-api.com/v6/latest/USD',
-         'daily', '~1 day (updated ~00:00 UTC)', 'free, no key required',
-         'Covers 150+ currencies incl. VND. Rates are mid-market reference rates.'),
-
-        ('frankfurter', 'Frankfurter', 'https://frankfurter.dev',
-         'ECB Reference Rates', None, 'https://api.frankfurter.dev/v1/',
-         'daily', 'T+1 (ECB publishes ~16:00 CET)', 'free, no key, open-source',
-         'Sourced from European Central Bank. Does NOT include VND. Used for FX backfill.'),
+        # FX source (yfinance)
+        ('yfinance:fx', 'Yahoo Finance', 'https://finance.yahoo.com',
+         'FX Rates (USD pairs)', 'IDR=X, MYR=X, PHP=X, THB=X, VND=X',
+         'https://finance.yahoo.com/quote/IDR=X',
+         'daily', 'near real-time', 'free (yfinance library)',
+         'Mid-market USD exchange rates via Yahoo Finance. Updated throughout trading hours.'),
 
         # yfinance sources — one entry per underlying dataset
         ('yfinance:us10y', 'Yahoo Finance', 'https://finance.yahoo.com',
@@ -106,6 +102,12 @@ def init_db():
          'https://finance.yahoo.com/quote/GC=F/',
          'daily', 'end-of-day', 'free (yfinance library)',
          'COMEX gold front-month futures settlement price in USD/troy oz.'),
+
+        ('yfinance:jkm', 'Yahoo Finance', 'https://finance.yahoo.com',
+         'JKM LNG Futures', 'JKM=F',
+         'https://finance.yahoo.com/quote/JKM=F/',
+         'daily', 'end-of-day', 'free (yfinance library)',
+         'S&P Global Platts JKM LNG futures in USD/MMBtu.'),
 
         # Tier 2: Asian Bonds Online (ADB)
         ('adb:asianbondsonline', 'Asian Development Bank', 'https://asianbondsonline.adb.org',
@@ -131,13 +133,6 @@ def init_db():
          'https://www.investing.com/commodities/rubber-tsr20-futures',
          'daily', 'near real-time', 'free (public website)',
          'SGX TSR20 rubber futures in USc/kg.'),
-
-        ('investing.com:jkm', 'Investing.com', 'https://www.investing.com',
-         'JKM LNG Futures (Platts)', None,
-         'https://www.investing.com/commodities/lng-japan-korea-marker-platts-futures',
-         'daily', 'near real-time', 'free (public website)',
-         'S&P Global Platts JKM LNG futures in USD/MMBtu. '
-         'Note: this is futures-based, not the official Platts daily spot assessment.'),
 
         ('investing.com:coal', 'Investing.com', 'https://www.investing.com',
          'Newcastle Coal Futures', None,
@@ -173,12 +168,12 @@ def init_db():
 
     # Seed indicator metadata
     indicators = [
-        # FX rates
-        ('IDR', 'fx', 'Indonesian Rupiah', 'per USD', 'exchangerate-api', 1),
-        ('MYR', 'fx', 'Malaysian Ringgit', 'per USD', 'exchangerate-api', 1),
-        ('PHP', 'fx', 'Philippine Peso', 'per USD', 'exchangerate-api', 1),
-        ('THB', 'fx', 'Thai Baht', 'per USD', 'exchangerate-api', 1),
-        ('VND', 'fx', 'Vietnamese Dong', 'per USD', 'exchangerate-api', 1),
+        # FX rates (yfinance)
+        ('IDR', 'fx', 'Indonesian Rupiah', 'per USD', 'yfinance:fx', 1),
+        ('MYR', 'fx', 'Malaysian Ringgit', 'per USD', 'yfinance:fx', 1),
+        ('PHP', 'fx', 'Philippine Peso', 'per USD', 'yfinance:fx', 1),
+        ('THB', 'fx', 'Thai Baht', 'per USD', 'yfinance:fx', 1),
+        ('VND', 'fx', 'Vietnamese Dong', 'per USD', 'yfinance:fx', 1),
 
         # Bond yields
         ('US_10Y', 'bond', 'US 10Y Treasury Yield', 'percent', 'yfinance:us10y', 1),
@@ -189,7 +184,7 @@ def init_db():
 
         # Commodities
         ('BRENT', 'commodity', 'Brent Crude Oil (ICE Futures)', 'USD/bbl', 'yfinance:brent', 1),
-        ('JKM_LNG', 'commodity', 'JKM LNG Futures (Platts)', 'USD/MMBtu', 'investing.com:jkm', 2),
+        ('JKM_LNG', 'commodity', 'JKM LNG Futures (Platts)', 'USD/MMBtu', 'yfinance:jkm', 1),
         ('COAL_NEWC', 'commodity', 'Thermal Coal (Newcastle FOB)', 'USD/tonne', 'investing.com:coal', 2),
         ('CPO', 'commodity', 'Crude Palm Oil (Bursa Malaysia FCPO)', 'MYR/tonne', 'investing.com:cpo', 2),
         ('RUBBER_TSR20', 'commodity', 'Rubber TSR20 Futures (SGX)', 'USc/kg', 'investing.com:rubber', 2),
