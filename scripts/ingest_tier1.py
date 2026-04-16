@@ -1,26 +1,30 @@
 """
-Tier 1 Data Ingestion: Free API sources
+Tier 1 Data Ingestion: yfinance sources
 ========================================
-Pulls data from:
-  - ExchangeRate-API (open.er-api.com) for FX rates
-  - yfinance for US 10Y yield, Brent crude, Gold spot
+Pulls data from yfinance for:
+  - ASEAN FX rates (USD/IDR, USD/MYR, USD/PHP, USD/THB, USD/VND)
+  - US 10Y Treasury yield
+  - Brent crude oil
+  - Gold spot
+
+Source URLs (per indicator) live in build_dashboard.py DISPLAY_URLS and
+all point to the matching Yahoo Finance quote page so the dashboard's
+displayed value can be cross-checked against the same source.
 
 Usage:
   python ingest_tier1.py              # ingest latest data
-  python ingest_tier1.py --date 2026-03-28  # ingest specific date (FX only; yfinance always gets latest)
-  python ingest_tier1.py --backfill 30      # backfill last N days of FX data
+  python ingest_tier1.py --backfill 30  # backfill last N days
+  python ingest_tier1.py --fx-only       # FX only
+  python ingest_tier1.py --market-only   # bonds + commodities only
 """
 
 import argparse
-import json
 import logging
 import os
 import sqlite3
-from datetime import datetime, timedelta
-from urllib.request import urlopen, Request
-from urllib.error import URLError
+from datetime import datetime
 
-# Optional: yfinance for market data
+# yfinance is required (FX, bonds, and commodities all use it)
 try:
     import yfinance as yf
     HAS_YFINANCE = True
@@ -34,8 +38,15 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.abspath(os.path.join(SCRIPT_DIR, '..', 'data', 'dashboard.db'))
 LOG_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, '..', 'logs'))
 
-FX_CURRENCIES = ['IDR', 'MYR', 'PHP', 'THB', 'VND']
-FX_API_URL = "https://open.er-api.com/v6/latest/USD"
+# FX tickers on Yahoo Finance: "{CCY}=X" returns the USD/{CCY} mid rate
+# (units: per USD, same as what we previously stored from ExchangeRate-API).
+FX_TICKERS = {
+    'IDR': ('IDR=X', 'fx', 'per USD', 'yfinance:fx'),
+    'MYR': ('MYR=X', 'fx', 'per USD', 'yfinance:fx'),
+    'PHP': ('PHP=X', 'fx', 'per USD', 'yfinance:fx'),
+    'THB': ('THB=X', 'fx', 'per USD', 'yfinance:fx'),
+    'VND': ('VND=X', 'fx', 'per USD', 'yfinance:fx'),
+}
 
 YFINANCE_TICKERS = {
     'US_10Y':  ('^TNX',  'bond',      'percent',  'yfinance:us10y'),
@@ -61,7 +72,6 @@ logger = logging.getLogger(__name__)
 def get_conn():
     """Get a database connection, creating the DB if needed."""
     if not os.path.exists(DB_PATH):
-        # Initialize DB via schema module
         import schema
         schema.init_db()
     return sqlite3.connect(DB_PATH)
@@ -88,68 +98,100 @@ def log_ingestion(conn, source, status, records, message=''):
     ''', (now, source, status, records, message))
 
 
-# ---------- FX ingestion ----------
+# ---------- Generic yfinance fetch ----------
 
-def fetch_fx_latest():
-    """Fetch latest FX rates from open.er-api.com."""
-    logger.info("Fetching FX rates from ExchangeRate-API...")
-    req = Request(FX_API_URL, headers={'User-Agent': 'ASEAN-Dashboard/1.0'})
-    try:
-        with urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode())
-    except (URLError, Exception) as e:
-        logger.error(f"FX API request failed: {e}")
-        return None
+def _fetch_yf_latest(tickers_dict, label):
+    """
+    For a {indicator: (ticker, category, unit, source)} dict, fetch the
+    most recent close for each and return a list of records to upsert.
+    Returns (records_list, errors_list).
+    """
+    records = []
+    errors = []
+    for indicator, (ticker, category, unit, source) in tickers_dict.items():
+        try:
+            t = yf.Ticker(ticker)
+            hist = t.history(period='5d')
+            if hist.empty:
+                logger.warning(f"  {indicator} ({ticker}): no data")
+                errors.append(f"{indicator}: no data")
+                continue
+            latest = hist.iloc[-1]
+            date_str = hist.index[-1].strftime('%Y-%m-%d')
+            value = float(latest['Close'])
+            records.append((date_str, category, indicator, value, unit, source))
+            logger.info(f"  {indicator}: {value:.6f} {unit} ({date_str})")
+        except Exception as e:
+            logger.error(f"yfinance error for {indicator}: {e}")
+            errors.append(f"{indicator}: {e}")
+    logger.info(f"{label}: fetched {len(records)}/{len(tickers_dict)} tickers")
+    return records, errors
 
-    if data.get('result') != 'success':
-        logger.error(f"FX API returned error: {data}")
-        return None
 
-    # Extract date and rates
-    # The API returns time_last_update_utc like "Wed, 01 Apr 2026 00:02:31 +0000"
-    # Parse just the date portion
-    date_str = data.get('time_last_update_utc', '')
-    try:
-        dt = datetime.strptime(date_str, '%a, %d %b %Y %H:%M:%S %z')
-        date_str = dt.strftime('%Y-%m-%d')
-    except ValueError:
-        date_str = datetime.utcnow().strftime('%Y-%m-%d')
+def _backfill_yf(tickers_dict, days, label):
+    """Backfill tickers_dict for the last N days. Returns list of records."""
+    records = []
+    period = f'{days}d'
+    for indicator, (ticker, category, unit, source) in tickers_dict.items():
+        try:
+            t = yf.Ticker(ticker)
+            hist = t.history(period=period)
+            for idx, row in hist.iterrows():
+                date_str = idx.strftime('%Y-%m-%d')
+                value = float(row['Close'])
+                records.append((date_str, category, indicator, value, unit, source))
+            logger.info(f"  {indicator}: {len(hist)} days backfilled")
+        except Exception as e:
+            logger.error(f"Backfill error for {indicator}: {e}")
+    logger.info(f"{label} backfill: {len(records)} records over {days} days")
+    return records
 
-    rates = data.get('rates', {})
-    result = {}
-    for ccy in FX_CURRENCIES:
-        if ccy in rates:
-            result[ccy] = rates[ccy]
-        else:
-            logger.warning(f"Currency {ccy} not found in API response")
 
-    logger.info(f"FX rates for {date_str}: {result}")
-    return date_str, result
-
+# ---------- FX ingestion (yfinance) ----------
 
 def ingest_fx(conn, date_override=None):
-    """Ingest FX rates into the database."""
-    data = fetch_fx_latest()
-    if data is None:
-        log_ingestion(conn, 'exchangerate-api', 'error', 0, 'API request failed')
+    """Fetch latest FX rates from yfinance and upsert into DB."""
+    if not HAS_YFINANCE:
+        logger.error("yfinance not available, skipping FX")
+        log_ingestion(conn, 'yfinance:fx', 'error', 0, 'yfinance not installed')
         return 0
 
-    date_str, rates = data
-    if date_override:
-        date_str = date_override
+    logger.info("Fetching FX rates from yfinance...")
+    records, errors = _fetch_yf_latest(FX_TICKERS, 'FX')
 
     count = 0
-    for ccy, rate in rates.items():
-        upsert_record(conn, date_str, 'fx', ccy, rate, 'per USD', 'exchangerate-api')
+    for date_str, category, indicator, value, unit, source in records:
+        if date_override:
+            date_str = date_override
+        upsert_record(conn, date_str, category, indicator, value, unit, source)
         count += 1
 
-    log_ingestion(conn, 'exchangerate-api', 'success', count,
-                  f'Ingested {count} FX rates for {date_str}')
-    logger.info(f"Stored {count} FX rates for {date_str}")
+    status = 'success' if not errors else ('partial' if count > 0 else 'error')
+    msg = f"Ingested {count}/{len(FX_TICKERS)} FX rates"
+    if errors:
+        msg += f" | Errors: {'; '.join(errors)}"
+    log_ingestion(conn, 'yfinance:fx', status, count, msg)
     return count
 
 
-# ---------- yfinance ingestion ----------
+def backfill_fx(conn, days=30):
+    """Backfill FX rates from yfinance for the last N days."""
+    if not HAS_YFINANCE:
+        logger.error("yfinance not available")
+        return 0
+
+    logger.info(f"Backfilling FX rates for last {days} days from yfinance...")
+    records = _backfill_yf(FX_TICKERS, days, 'FX')
+
+    for date_str, category, indicator, value, unit, source in records:
+        upsert_record(conn, date_str, category, indicator, value, unit, source)
+
+    log_ingestion(conn, 'yfinance:fx-backfill', 'success', len(records),
+                  f'Backfilled {len(records)} FX records over {days} days')
+    return len(records)
+
+
+# ---------- Bonds + commodities (yfinance) ----------
 
 def ingest_yfinance(conn):
     """Ingest US 10Y, Brent, Gold from yfinance."""
@@ -159,112 +201,36 @@ def ingest_yfinance(conn):
         return 0
 
     logger.info("Fetching market data from yfinance...")
+    records, errors = _fetch_yf_latest(YFINANCE_TICKERS, 'Market data')
+
     count = 0
-    errors = []
-
-    for indicator, (ticker, category, unit, source) in YFINANCE_TICKERS.items():
-        try:
-            t = yf.Ticker(ticker)
-            hist = t.history(period='5d')
-
-            if hist.empty:
-                logger.warning(f"No data for {indicator} ({ticker})")
-                errors.append(f"{indicator}: no data")
-                continue
-
-            # Get the most recent row
-            latest = hist.iloc[-1]
-            date_str = hist.index[-1].strftime('%Y-%m-%d')
-            value = float(latest['Close'])
-
-            # US 10Y from yfinance is already in percentage points
-            upsert_record(conn, date_str, category, indicator, value, unit, source)
-            count += 1
-            logger.info(f"  {indicator}: {value:.4f} {unit} ({date_str})")
-
-        except Exception as e:
-            logger.error(f"yfinance error for {indicator}: {e}")
-            errors.append(f"{indicator}: {e}")
+    for date_str, category, indicator, value, unit, source in records:
+        upsert_record(conn, date_str, category, indicator, value, unit, source)
+        count += 1
 
     status = 'success' if not errors else ('partial' if count > 0 else 'error')
     msg = f"Ingested {count}/{len(YFINANCE_TICKERS)} tickers"
     if errors:
         msg += f" | Errors: {'; '.join(errors)}"
-
     log_ingestion(conn, 'yfinance', status, count, msg)
     return count
 
 
-# ---------- Backfill helper (FX only) ----------
-
-def backfill_fx(conn, days=30):
-    """Backfill FX rates for the last N days using Frankfurter API (supports historical)."""
-    logger.info(f"Backfilling FX rates for last {days} days via Frankfurter API...")
-    count = 0
-    today = datetime.utcnow().date()
-
-    for i in range(days, 0, -1):
-        target_date = today - timedelta(days=i)
-        date_str = target_date.strftime('%Y-%m-%d')
-
-        # Skip weekends
-        if target_date.weekday() >= 5:
-            continue
-
-        url = f"https://api.frankfurter.dev/v1/{date_str}?base=USD&symbols=IDR,MYR,PHP,THB"
-        try:
-            req = Request(url, headers={'User-Agent': 'ASEAN-Dashboard/1.0'})
-            with urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode())
-
-            rates = data.get('rates', {})
-            actual_date = data.get('date', date_str)
-
-            for ccy, rate in rates.items():
-                upsert_record(conn, actual_date, 'fx', ccy, rate, 'per USD', 'frankfurter')
-                count += 1
-
-        except Exception as e:
-            logger.warning(f"Backfill failed for {date_str}: {e}")
-            continue
-
-    # VND is not available on Frankfurter, so we note that
-    logger.info(f"Backfilled {count} FX records (note: VND not available on Frankfurter historical)")
-    log_ingestion(conn, 'frankfurter-backfill', 'success', count,
-                  f'Backfilled {count} records over {days} days (excl. VND)')
-    return count
-
-
-# ---------- yfinance backfill ----------
-
 def backfill_yfinance(conn, days=30):
-    """Backfill yfinance tickers for the last N days."""
+    """Backfill yfinance market tickers for the last N days."""
     if not HAS_YFINANCE:
         logger.error("yfinance not available")
         return 0
 
-    logger.info(f"Backfilling yfinance data for last {days} days...")
-    count = 0
-    period = f'{days}d'
+    logger.info(f"Backfilling yfinance market data for last {days} days...")
+    records = _backfill_yf(YFINANCE_TICKERS, days, 'Market data')
 
-    for indicator, (ticker, category, unit, source) in YFINANCE_TICKERS.items():
-        try:
-            t = yf.Ticker(ticker)
-            hist = t.history(period=period)
+    for date_str, category, indicator, value, unit, source in records:
+        upsert_record(conn, date_str, category, indicator, value, unit, source)
 
-            for idx, row in hist.iterrows():
-                date_str = idx.strftime('%Y-%m-%d')
-                value = float(row['Close'])
-                upsert_record(conn, date_str, category, indicator, value, unit, source)
-                count += 1
-
-            logger.info(f"  {indicator}: {len(hist)} days backfilled")
-        except Exception as e:
-            logger.error(f"Backfill error for {indicator}: {e}")
-
-    log_ingestion(conn, 'yfinance-backfill', 'success', count,
-                  f'Backfilled {count} records over {days} days')
-    return count
+    log_ingestion(conn, 'yfinance-backfill', 'success', len(records),
+                  f'Backfilled {len(records)} records over {days} days')
+    return len(records)
 
 
 # ---------- Main ----------
@@ -301,7 +267,7 @@ def main():
     parser.add_argument('--fx-only', action='store_true',
                         help='Only ingest FX rates')
     parser.add_argument('--market-only', action='store_true',
-                        help='Only ingest yfinance data (US 10Y, Brent, Gold)')
+                        help='Only ingest yfinance bond and commodity data')
     args = parser.parse_args()
 
     # Ensure DB exists
@@ -322,7 +288,6 @@ def main():
             ingest_yfinance(conn)
             conn.commit()
         else:
-            # Default: run everything
             ingest_fx(conn, date_override=args.date)
             ingest_yfinance(conn)
             conn.commit()

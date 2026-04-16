@@ -149,6 +149,7 @@ def build_html(data):
                 'raw_value': value,
                 'unit': meta.get('unit', ''),
                 'date': rec.get('date', '—'),
+                'prev_date': rec.get('prev_date', ''),
                 'change': chg,
                 'change_pct': pct,
                 'has_chart': ind in chart_data,
@@ -162,6 +163,32 @@ def build_html(data):
     bond_cards = make_card_data(bond_order)
     commodity_cards = make_card_data(commodity_order)
 
+    # Display-URL overrides — the URLs stored in data_sources.data_url are
+    # scraping endpoints (JSON APIs, template URLs, etc.) not always useful
+    # for a human reader. Map each indicator to a friendly landing page.
+    DISPLAY_URLS = {
+        # FX — Yahoo Finance quote pages (USD/{ccy})
+        'IDR': 'https://finance.yahoo.com/quote/IDR=X',
+        'MYR': 'https://finance.yahoo.com/quote/MYR=X',
+        'PHP': 'https://finance.yahoo.com/quote/PHP=X',
+        'THB': 'https://finance.yahoo.com/quote/THB=X',
+        'VND': 'https://finance.yahoo.com/quote/VND=X',
+        # Bonds — ADB per-country pages
+        'US_10Y': 'https://finance.yahoo.com/quote/%5ETNX',
+        'ID_10Y': 'https://asianbondsonline.adb.org/economy/?economy=ID',
+        'MY_10Y': 'https://asianbondsonline.adb.org/economy/?economy=MY',
+        'PH_10Y': 'https://asianbondsonline.adb.org/economy/?economy=PH',
+        'TH_10Y': 'https://asianbondsonline.adb.org/economy/?economy=TH',
+        # Commodities — Yahoo Finance quote pages where applicable
+        'BRENT':        'https://finance.yahoo.com/quote/BZ%3DF',
+        'GOLD':         'https://finance.yahoo.com/quote/GC%3DF',
+        'JKM_LNG':      'https://finance.yahoo.com/quote/JKM%3DF',
+        'NICKEL':       'https://www.investing.com/commodities/nickel',
+        'CPO':          'https://www.investing.com/commodities/palm-oil',
+        'RUBBER_TSR20': 'https://www.investing.com/commodities/rubber-tsr20-futures',
+        'COAL_NEWC':    'https://www.investing.com/commodities/newcastle-coal-futures',
+    }
+
     # Source attribution rows
     source_rows = []
     for ind_key in fx_order + bond_order + commodity_order:
@@ -169,7 +196,8 @@ def build_html(data):
         prov = meta.get('provider', '—')
         ds = meta.get('dataset', '—')
         ticker = meta.get('ticker_or_id', '')
-        url = meta.get('data_url', '')
+        # Prefer a friendly display URL; fall back to the raw scraping URL
+        url = DISPLAY_URLS.get(ind_key) or meta.get('data_url', '')
         freq = meta.get('frequency', '')
         lag = meta.get('lag', '')
         lic = meta.get('license_info', '')
@@ -244,9 +272,9 @@ def build_html(data):
     gap: 14px;
   }}
   .grid-5 {{ grid-template-columns: repeat(5, 1fr); }}
-  .grid-7 {{ grid-template-columns: repeat(7, 1fr); }}
-  @media (max-width: 1100px) {{
-    .grid-7 {{ grid-template-columns: repeat(4, 1fr); }}
+  .grid-7 {{ grid-template-columns: repeat(4, 1fr); }}
+  @media (max-width: 900px) {{
+    .grid-7 {{ grid-template-columns: repeat(3, 1fr); }}
   }}
   @media (max-width: 768px) {{
     .grid-5, .grid-7 {{ grid-template-columns: repeat(2, 1fr); }}
@@ -263,6 +291,12 @@ def build_html(data):
     transition: border-color 0.15s;
   }}
   .card:hover {{ border-color: var(--accent); }}
+  .card-header {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }}
   .card-label {{
     font-size: 0.78rem;
     color: var(--text-dim);
@@ -270,7 +304,22 @@ def build_html(data):
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    flex: 1;
   }}
+  .card-download {{
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    line-height: 1;
+    opacity: 0.4;
+    transition: all 0.15s;
+  }}
+  .card:hover .card-download {{ opacity: 1; }}
+  .card-download:hover {{ color: var(--accent); background: var(--surface2); }}
   .card-value {{
     font-size: 1.45rem;
     font-weight: 700;
@@ -370,7 +419,7 @@ def build_html(data):
 <body>
 
 <h1>ASEAN Markets Dashboard</h1>
-<p class="subtitle">Last updated: {generated_at}</p>
+<p class="subtitle">Last updated: {generated_at} &nbsp;·&nbsp; <a href="#" onclick="downloadAllCSV(); return false;" style="color:var(--accent);text-decoration:none;">Download all data (CSV)</a></p>
 
 <!-- FX Section -->
 <div class="section-title">Currency Performance vs USD</div>
@@ -453,17 +502,63 @@ function renderCards(containerId, cards) {{
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML = `
-      <div class="card-label">${{c.label}}</div>
+      <div class="card-header">
+        <div class="card-label">${{c.label}}</div>
+        ${{c.has_chart ? `<button class="card-download" title="Download ${{c.indicator}} time series as CSV" onclick="downloadCSV('${{c.indicator}}', '${{c.label.replace(/'/g, "\\\\'")}}', '${{c.unit}}')">&#x2B07;</button>` : ''}}
+      </div>
       <div>
         <span class="card-value">${{c.value}}</span>
         <span class="card-unit">${{c.unit}}</span>
       </div>
-      <div class="card-change ${{cls}}">${{chgText}}</div>
+      <div class="card-change ${{cls}}" title="${{c.prev_date ? 'vs ' + c.prev_date : ''}}">${{chgText}}${{chgText !== '—' ? ' <span style="opacity:0.5;font-size:0.68rem">1d</span>' : ''}}</div>
       ${{c.has_chart ? `<div class="spark-container"><canvas id="${{canvasId}}"></canvas></div>` : ''}}
       <div class="card-date">as of ${{c.date}}</div>
     `;
     grid.appendChild(card);
   }});
+}}
+
+// === CSV download ===
+function downloadAllCSV() {{
+  const header = `date,value,indicator,unit\\n`;
+  const allRows = [];
+  for (const ind in CHART_DATA) {{
+    const data = CHART_DATA[ind];
+    const card = [...FX_CARDS, ...BOND_CARDS, ...COMMODITY_CARDS].find(c => c.indicator === ind);
+    const unit = card ? card.unit : '';
+    data.labels.forEach((date, i) => {{
+      allRows.push(`${{date}},${{data.values[i]}},${{ind}},${{unit}}`);
+    }});
+  }}
+  const csv = header + allRows.join('\\n') + '\\n';
+  const blob = new Blob([csv], {{ type: 'text/csv;charset=utf-8;' }});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `asean_dashboard_${{new Date().toISOString().slice(0,10)}}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}}
+
+function downloadCSV(indicator, label, unit) {{
+  const data = CHART_DATA[indicator];
+  if (!data) return;
+  const header = `date,value,indicator,unit\\n`;
+  const rows = data.labels.map((date, i) => {{
+    return `${{date}},${{data.values[i]}},${{indicator}},${{unit || ''}}`;
+  }}).join('\\n');
+  const csv = header + rows + '\\n';
+  const blob = new Blob([csv], {{ type: 'text/csv;charset=utf-8;' }});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${{indicator}}_timeseries.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }}
 
 renderCards('fx-grid', FX_CARDS);
