@@ -200,7 +200,7 @@
 <body>
 
 <h1>ASEAN Markets Dashboard</h1>
-<p class="subtitle">Last updated: 2026-04-16 02:21 UTC &nbsp;·&nbsp; <a href="#" onclick="downloadAllCSV(); return false;" style="color:var(--accent);text-decoration:none;">Download all data (CSV)</a></p>
+<p class="subtitle">Last updated: 2026-04-16 02:34 UTC &nbsp;·&nbsp; <a href="#" onclick="downloadAllCSV(); return false;" style="color:var(--accent);text-decoration:none;">Download all data (CSV)</a></p>
 
 <!-- FX Section -->
 <div class="section-title">Currency Performance vs USD</div>
@@ -238,7 +238,7 @@
 
 <div class="footer">
   <span>ASEAN Markets Dashboard &mdash; Data from ExchangeRate-API, Yahoo Finance, Asian Bonds Online (ADB), Investing.com</span>
-  <span>Generated: 2026-04-16 02:21 UTC</span>
+  <span>Generated: 2026-04-16 02:34 UTC</span>
 </div>
 
 <script>
@@ -355,6 +355,9 @@ function drawSparkline(canvasId, indicator) {
   const first = vals[0], last = vals[vals.length - 1];
   const color = last >= first ? '#34d399' : '#f87171';
 
+  // Look up the card metadata so we can format tooltip values
+  const card = [...FX_CARDS, ...BOND_CARDS, ...COMMODITY_CARDS].find(c => c.indicator === indicator);
+
   new Chart(el, {
     type: 'line',
     data: {
@@ -366,13 +369,46 @@ function drawSparkline(canvasId, indicator) {
         fill: true,
         tension: 0.3,
         pointRadius: 0,
+        pointHoverRadius: 4,
+        pointHoverBackgroundColor: color,
+        pointHoverBorderColor: '#fff',
+        pointHoverBorderWidth: 1.5,
         borderWidth: 1.5,
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      interaction: {
+        mode: 'index',
+        intersect: false,
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          enabled: true,
+          backgroundColor: 'rgba(30,30,30,0.92)',
+          titleFont: { size: 10 },
+          bodyFont: { size: 11, weight: 'bold' },
+          padding: 6,
+          cornerRadius: 4,
+          displayColors: false,
+          callbacks: {
+            title: function(items) {
+              return items[0].label;
+            },
+            label: function(item) {
+              const v = item.raw;
+              const unit = card ? card.unit : '';
+              // Format based on indicator type
+              if (indicator === 'VND' || indicator === 'IDR') return v.toLocaleString('en-US', {maximumFractionDigits: 0}) + ' ' + unit;
+              if (indicator === 'NICKEL' || indicator === 'CPO') return v.toLocaleString('en-US', {maximumFractionDigits: 0}) + ' ' + unit;
+              if (card && (card.unit === 'percent' || card.unit === '%')) return v.toFixed(3) + '%';
+              return v.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ' + unit;
+            }
+          }
+        }
+      },
       scales: {
         x: { display: false },
         y: { display: false }
