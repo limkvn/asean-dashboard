@@ -77,12 +77,36 @@ def init_db():
 
     # Seed data sources
     data_sources = [
-        # FX source (yfinance)
-        ('yfinance:fx', 'Yahoo Finance', 'https://finance.yahoo.com',
-         'FX Rates (USD pairs)', 'IDR=X, MYR=X, PHP=X, THB=X, VND=X',
+        # FX sources (yfinance, one per currency)
+        ('yfinance:fx:idr', 'Yahoo Finance', 'https://finance.yahoo.com',
+         'USD/IDR Exchange Rate', 'IDR=X',
          'https://finance.yahoo.com/quote/IDR=X',
          'daily', 'near real-time', 'free (yfinance library)',
-         'Mid-market USD exchange rates via Yahoo Finance. Updated throughout trading hours.'),
+         'Mid-market USD/IDR exchange rate via Yahoo Finance.'),
+
+        ('yfinance:fx:myr', 'Yahoo Finance', 'https://finance.yahoo.com',
+         'USD/MYR Exchange Rate', 'MYR=X',
+         'https://finance.yahoo.com/quote/MYR=X',
+         'daily', 'near real-time', 'free (yfinance library)',
+         'Mid-market USD/MYR exchange rate via Yahoo Finance.'),
+
+        ('yfinance:fx:php', 'Yahoo Finance', 'https://finance.yahoo.com',
+         'USD/PHP Exchange Rate', 'PHP=X',
+         'https://finance.yahoo.com/quote/PHP=X',
+         'daily', 'near real-time', 'free (yfinance library)',
+         'Mid-market USD/PHP exchange rate via Yahoo Finance.'),
+
+        ('yfinance:fx:thb', 'Yahoo Finance', 'https://finance.yahoo.com',
+         'USD/THB Exchange Rate', 'THB=X',
+         'https://finance.yahoo.com/quote/THB=X',
+         'daily', 'near real-time', 'free (yfinance library)',
+         'Mid-market USD/THB exchange rate via Yahoo Finance.'),
+
+        ('yfinance:fx:vnd', 'Yahoo Finance', 'https://finance.yahoo.com',
+         'USD/VND Exchange Rate', 'VND=X',
+         'https://finance.yahoo.com/quote/VND=X',
+         'daily', 'near real-time', 'free (yfinance library)',
+         'Mid-market USD/VND exchange rate via Yahoo Finance.'),
 
         # yfinance sources — one entry per underlying dataset
         ('yfinance:us10y', 'Yahoo Finance', 'https://finance.yahoo.com',
@@ -169,11 +193,11 @@ def init_db():
     # Seed indicator metadata
     indicators = [
         # FX rates (yfinance)
-        ('IDR', 'fx', 'Indonesian Rupiah', 'per USD', 'yfinance:fx', 1),
-        ('MYR', 'fx', 'Malaysian Ringgit', 'per USD', 'yfinance:fx', 1),
-        ('PHP', 'fx', 'Philippine Peso', 'per USD', 'yfinance:fx', 1),
-        ('THB', 'fx', 'Thai Baht', 'per USD', 'yfinance:fx', 1),
-        ('VND', 'fx', 'Vietnamese Dong', 'per USD', 'yfinance:fx', 1),
+        ('IDR', 'fx', 'Indonesian Rupiah', 'per USD', 'yfinance:fx:idr', 1),
+        ('MYR', 'fx', 'Malaysian Ringgit', 'per USD', 'yfinance:fx:myr', 1),
+        ('PHP', 'fx', 'Philippine Peso', 'per USD', 'yfinance:fx:php', 1),
+        ('THB', 'fx', 'Thai Baht', 'per USD', 'yfinance:fx:thb', 1),
+        ('VND', 'fx', 'Vietnamese Dong', 'per USD', 'yfinance:fx:vnd', 1),
 
         # Bond yields
         ('US_10Y', 'bond', 'US 10Y Treasury Yield', 'percent', 'yfinance:us10y', 1),

@@ -41,11 +41,11 @@ LOG_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, '..', 'logs'))
 # FX tickers on Yahoo Finance: "{CCY}=X" returns the USD/{CCY} mid rate
 # (units: per USD, same as what we previously stored from ExchangeRate-API).
 FX_TICKERS = {
-    'IDR': ('IDR=X', 'fx', 'per USD', 'yfinance:fx'),
-    'MYR': ('MYR=X', 'fx', 'per USD', 'yfinance:fx'),
-    'PHP': ('PHP=X', 'fx', 'per USD', 'yfinance:fx'),
-    'THB': ('THB=X', 'fx', 'per USD', 'yfinance:fx'),
-    'VND': ('VND=X', 'fx', 'per USD', 'yfinance:fx'),
+    'IDR': ('IDR=X', 'fx', 'per USD', 'yfinance:fx:idr'),
+    'MYR': ('MYR=X', 'fx', 'per USD', 'yfinance:fx:myr'),
+    'PHP': ('PHP=X', 'fx', 'per USD', 'yfinance:fx:php'),
+    'THB': ('THB=X', 'fx', 'per USD', 'yfinance:fx:thb'),
+    'VND': ('VND=X', 'fx', 'per USD', 'yfinance:fx:vnd'),
 }
 
 YFINANCE_TICKERS = {
